@@ -1,0 +1,182 @@
+
+1st Query
+SELECT 
+    C.Name AS Class_Name, 
+    C.Schedule AS Class_Schedule, 
+    I.Name AS Instructor_Name
+FROM 
+    Class C
+JOIN 
+    Instructor I 
+ON 
+    C.InstructorID = I.InstructorID;
+
+
+
+    2nd Query 
+
+Select*From Class
+
+Where Type ='Yoga';
+
+3rd Query
+
+SELECT 
+    SUM(P.Total_Amount) AS MembershipRevenue,
+    (SELECT COUNT(*) * 50  -- Assuming fixed class fee of 50 per booking
+     FROM Class C
+     WHERE EXTRACT(MONTH FROM C.Schedule) = :Month
+     AND EXTRACT(YEAR FROM C.Schedule) = :Year) AS ClassBookingRevenue,
+    (SELECT SUM(T.Salary)
+     FROM Trainer T
+     WHERE EXTRACT(MONTH FROM T.Salary) = :Month
+     AND EXTRACT(YEAR FROM T.Salary) = :Year) AS PersonalTrainingRevenue,
+    SUM(P.Total_Amount) 
+    + (SELECT COUNT(*) * 50 FROM Class C 
+       WHERE EXTRACT(MONTH FROM C.Schedule) = :Month AND EXTRACT(YEAR FROM C.Schedule) = :Year)
+    + (SELECT SUM(T.Salary) FROM Trainer T 
+       WHERE EXTRACT(MONTH FROM T.Salary) = :Month AND EXTRACT(YEAR FROM T.Salary) = :Year)
+    AS TotalRevenue
+FROM 
+    Payment P
+WHERE 
+    EXTRACT(MONTH FROM P.Date) = :Month 
+    AND EXTRACT(YEAR FROM P.Date) = :Year;
+
+
+
+4th Query 
+SELECT 
+    T.TrainerID, 
+    T.Name AS TrainerName, 
+    COUNT(C.ClassID) AS TotalSessions
+FROM 
+    Trainer T
+JOIN 
+    Class C 
+ON 
+    T.TrainerID = C.Trainer_TrainerID
+WHERE 
+    C.Type = 'Personal Training'
+GROUP BY 
+    T.TrainerID, T.Name
+ORDER BY 
+    TotalSessions DESC
+FETCH FIRST 5 ROWS ONLY;
+
+5th Query
+
+SELECT 
+    M.MemberID, 
+    M.Name, 
+    M.EndDate
+    
+FROM 
+    Member M
+JOIN 
+    Class C 
+ON 
+    M.MemberID = C.Trainer_TrainerID -- Assuming Class table keeps attendance info
+WHERE 
+    M.EndDate < CURRENT_DATE -- Membership expired
+    AND C.Schedule >= CURRENT_DATE - INTERVAL '30' DAY -- Attended in the past 30 days
+ORDER BY 
+    C.Schedule DESC;
+
+6th Query
+
+WITH WorkoutCounts AS (
+    SELECT
+        wp.MembershipID,
+        COUNT(DISTINCT wp.CLOB) AS DistinctExercises,  -- Assuming CLOB stores exercise details
+        COUNT(wp.WorkoutplanID) AS TotalWorkouts
+    FROM
+        Workout_Plan wp
+    GROUP BY
+        wp.MembershipID
+    HAVING
+        COUNT(DISTINCT wp.CLOB) >= 3  -- Filter for at least three distinct exercises
+),
+RankedWorkouts AS (
+  SELECT
+        wc.MembershipID,
+        wc.TotalWorkouts,
+        RANK() OVER (ORDER BY wc.TotalWorkouts DESC) as WorkoutRank
+    FROM
+        WorkoutCounts wc
+)
+SELECT
+    m.Name
+FROM
+    Member m
+JOIN
+    RankedWorkouts rw ON m.MemberID = rw.MembershipID
+WHERE rw.WorkoutRank = 1; --Select the member with the highest number of workouts.
+
+
+7th Query 
+
+-- Assuming 'Payment' table has columns for discount information
+WITH DiscountedPayments AS (
+    SELECT
+        p.PaymentID,
+        p.TotalAmount,
+        -- Assuming 'PaymentMethod' stores info about discount codes or if a discount was applied
+        CASE
+            WHEN p.PaymentMethod LIKE '%DISCOUNT%' OR p.PaymentMethod LIKE '%Discount%' OR p.PaymentMethod IS NOT NULL THEN 1  -- Adjust condition as needed
+            ELSE 0
+        END AS HasDiscount,
+        -- Assuming a separate column for the discount amount. If not, you might need to calculate it.
+        --COALESCE(p.DiscountAmount, 0) AS DiscountAmount
+        CASE
+            WHEN p.PaymentMethod LIKE '%DISCOUNT%' OR p.PaymentMethod LIKE '%Discount%' THEN p.TotalAmount * 0.1 --10% discount for all discount payments
+            ELSE 0
+        END AS DiscountAmount
+        ,p.Date
+    FROM
+        Payment p
+        WHERE p.Date >= ADD_MONTHS(SYSDATE, -12) -- Last 12 months
+)
+SELECT
+    COUNT(CASE WHEN dp.HasDiscount = 1 THEN dp.PaymentID ELSE NULL END) AS TotalDiscountCodeUsages,
+    SUM(dp.DiscountAmount) AS TotalRevenueLostDueToDiscounts
+FROM
+    DiscountedPayments dp;
+
+    Select Sum(Total_Amount)
+    From Payment;
+
+
+    8th Query 
+
+    WITH MonthlyAttendance AS (
+    SELECT
+        m.MemberID,
+        m.Name AS MemberName,
+        c.Name AS ClassName,
+        c.Schedule AS ClassDate
+    FROM
+        Member m
+    JOIN
+        Class c ON m.MemberID = c.Instructorin -- Assuming Instructorin in Class table is a typo and it is actually MemberID
+    WHERE
+        c.Schedule >= ADD_MONTHS(SYSDATE, -1) -- Last month
+        AND c.Schedule < TRUNC(SYSDATE, 'MM') --To avoid current month data
+),
+AttendanceSummary AS (
+    SELECT
+        ma.MemberID,
+        ma.MemberName,
+        ma.ClassDate,
+        COUNT(*) OVER (PARTITION BY ma.MemberID) AS TotalClassesAttended
+    FROM
+        MonthlyAttendance ma
+)
+SELECT
+    asum.MemberName,
+    asum.ClassDate,
+    asum.TotalClassesAttended
+FROM
+    AttendanceSummary asum
+ORDER BY
+    asum.MemberName, asum.ClassDate; 
